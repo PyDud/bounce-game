@@ -10,6 +10,31 @@ class Vector:
         self.y = y
 
 
+class Platform(pygame.sprite.Sprite):
+    def __init__(self, top, left, size):
+        pygame.sprite.Sprite.__init__(self)
+        self.image = pygame.Surface((size, 10))
+        self.rect = self.image.get_rect()
+        self.rect.top = top
+        self.rect.left = left
+
+    def collide(self, player):
+        if (self.rect.colliderect(player.rect)):
+            if (player.velocity.y > 0):
+                player.rect.bottom = self.rect.top
+                player.onground = True
+            else:
+                player.rect.top = self.rect.bottom
+            player.velocity.y = 0
+
+    def onplatform(self, player):
+        if (self.rect.left <= player.rect.right and
+            player.rect.left <= self.rect.right):
+            if (player.rect.bottom == self.rect.top):
+                return True
+        return False
+
+
 class Player(pygame.sprite.Sprite):
     def __init__(self, size):
         pygame.sprite.Sprite.__init__(self)
@@ -57,6 +82,14 @@ class Bounce:
         self.player.rect.top = self.size.height - self.player.rect.height
         self.sprites.add(self.player)
 
+        # Platforms
+        self.platforms = []
+        self.platforms.append(Platform(self.size.height - 80, 100, 300))
+        self.platforms.append(Platform(self.size.height - 160, 200, 100))
+        self.platforms.append(Platform(self.size.height - 240, 40, 150))
+        self.platforms.append(Platform(self.size.height - 240, 340, 150))
+        self.sprites.add(self.platforms)
+
         # Loop until this is set True
         self.done = False
 
@@ -67,29 +100,40 @@ class Bounce:
         pygame.display.flip()
 
     def nextState(self):
-        for sprite in self.sprites:
-            # Gravity!
-            if not sprite.onground:
-                sprite.velocity.y += 0.5
+        # Gravity!
+        if not self.player.onground:
+            self.player.velocity.y += 0.5
 
-            # Update position
-            sprite.rect.left += sprite.velocity.x
-            sprite.rect.top += sprite.velocity.y
+        # Update position
+        self.player.rect.left += self.player.velocity.x
+        self.player.rect.top += self.player.velocity.y
 
-            # Collide with ground
-            if not sprite.onground:
-                if (sprite.rect.top + sprite.rect.height >= self.size.height):
-                    sprite.rect.top = self.size.height - sprite.rect.height
-                    sprite.velocity.y = 0
-                    sprite.onground = True
+        # Collide with ground
+        if not self.player.onground:
+            if (self.player.rect.bottom >= self.size.height):
+                self.player.rect.bottom = self.size.height
+                self.player.velocity.y = 0
+                self.player.onground = True
 
-            # Collide with walls
-            if (sprite.rect.left < 0):
-                sprite.velocity.x = 0
-                sprite.rect.left = 0
-            if (sprite.rect.left + sprite.rect.width > self.size.width):
-                sprite.velocity.x = 0
-                sprite.rect.left = self.size.width - sprite.rect.width
+        # Collide with walls
+        if (self.player.rect.left < 0):
+            self.player.velocity.x = 0
+            self.player.rect.left = 0
+        if (self.player.rect.right > self.size.width):
+            self.player.velocity.x = 0
+            self.player.rect.right = self.size.width
+
+        # Fall off platforms
+        onplatform = False
+        for platform in self.platforms:
+            onplatform |= platform.onplatform(self.player)
+
+        if not onplatform and self.player.rect.bottom < self.size.height:
+            self.player.onground = False
+
+        # Collide with platforms
+        for platform in self.platforms:
+            platform.collide(self.player)
 
     def processEvents(self):
         # Handle key preses from event queue
