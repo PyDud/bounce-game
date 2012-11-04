@@ -1,7 +1,11 @@
 # -*- coding: utf-8 *-*
 import pygame
 import sys
+import random
 from pygame.locals import *
+
+
+GRAVITY = 0.5
 
 
 class Vector:
@@ -18,14 +22,32 @@ class Platform(pygame.sprite.Sprite):
         self.rect.top = top
         self.rect.left = left
 
-    def collide(self, player):
+    def collide(self, player, particles, sprites):
         if (self.rect.colliderect(player.rect)):
-            if (player.velocity.y > 0):
-                player.rect.bottom = self.rect.top
-                player.onground = True
+            if ((player.velocity.x == 0) or
+                ((player.velocity.x > 0) and
+                  (self.rect.left < player.lastrect.right)) or
+                ((player.velocity.x < 0) and
+                  (player.lastrect.left < self.rect.right))):
+                # Player was previously above/below the platform
+                if (player.velocity.y > 0):
+                    # Player is falling
+                    player.rect.bottom = self.rect.top
+                    player.onground = True
+                    player.explode(particles, sprites)
+                else:
+                    # Player is rising
+                    player.rect.top = self.rect.bottom
+                player.velocity.y = 0
             else:
-                player.rect.top = self.rect.bottom
-            player.velocity.y = 0
+                # Player has hit an edge
+                if (player.velocity.x > 0):
+                    # Player is moving right
+                    player.rect.right = self.rect.left
+                else:
+                    # Player is moving left
+                    player.rect.left = self.rect.right
+                player.velocity.x = 0
 
     def onplatform(self, player):
         if (self.rect.left <= player.rect.right and
@@ -40,6 +62,8 @@ class Player(pygame.sprite.Sprite):
         pygame.sprite.Sprite.__init__(self)
         self.image = pygame.Surface((size, size))
         self.rect = self.image.get_rect()
+        self.lastrect = Rect(self.rect.left, self.rect.top,
+                             self.rect.width, self.rect.height)
         self.velocity = Vector(0, 0)
         self.onground = True
 
@@ -51,43 +75,77 @@ class Player(pygame.sprite.Sprite):
         if self.onground:
             self.velocity.x = direction * 4
         else:
-            self.velocity.x += direction * 0.2
+            self.velocity.x += direction * 0.5
             if abs(self.velocity.x) > 4:
                 self.velocity.x = direction * 4
 
     def stop(self):
         self.velocity.x = 0
 
+    def explode(self, particles, sprites):
+        if (self.velocity.y > 1):
+            numparticles = 5 + random.randrange(1, 2 + int(self.velocity.y))
+        else:
+            numparticles = 25
+
+        for i in range(numparticles):
+            velx = random.randrange(-5, 5)
+            vely = random.randrange(-10, -1)
+            particle = Particle(4, Vector(velx, vely),
+                                self.rect)
+            particles.add(particle)
+            sprites.add(particle)
+
+
+class Particle(pygame.sprite.Sprite):
+    def __init__(self, size, velocity, origin):
+        pygame.sprite.Sprite.__init__(self)
+        self.image = pygame.Surface((size, size))
+        self.rect = self.image.get_rect()
+        self.rect.top = origin.top + (origin.height / 2)
+        self.rect.left = origin.left + (origin.width / 2)
+        self.velocity = velocity
+
+    def update(self, screenrect, sprites, particles):
+        self.velocity.y += GRAVITY
+
+        self.rect.left += self.velocity.x
+        self.rect.top += self.velocity.y
+
+        if (not screenrect.colliderect(self.rect)):
+            particles.remove(self)
+            sprites.remove(self)
+
 
 class Bounce:
-
     def __init__(self):
         # Init pygame
         pygame.init()
         # Init pygame screen and draw background
-        self.size = Rect(0, 0, 700, 500)
-        self.screen = pygame.display.set_mode((self.size.width,
-                                               self.size.height))
-        self.background = pygame.Surface((self.size.width,
-                                          self.size.height))
+        self.screenrect = Rect(0, 0, 700, 500)
+        self.screen = pygame.display.set_mode((self.screenrect.width,
+                                               self.screenrect.height))
+        self.background = pygame.Surface((self.screenrect.width,
+                                          self.screenrect.height))
         self.background.fill((255, 255, 255))
         self.screen.blit(self.background, [0, 0])
         pygame.display.set_caption("Platformer")
 
         # Define game objects container
         self.sprites = pygame.sprite.OrderedUpdates()
+        self.particles = pygame.sprite.OrderedUpdates()
 
         # Player object
         self.player = Player(30)
-        self.player.rect.top = self.size.height - self.player.rect.height
+        self.player.rect.top = self.screenrect.height - self.player.rect.height
         self.sprites.add(self.player)
 
         # Platforms
         self.platforms = []
-        self.platforms.append(Platform(self.size.height - 80, 100, 300))
-        self.platforms.append(Platform(self.size.height - 160, 200, 100))
-        self.platforms.append(Platform(self.size.height - 240, 40, 150))
-        self.platforms.append(Platform(self.size.height - 240, 340, 150))
+        self.platforms.append(Platform(self.screenrect.height - 80, 100, 300))
+        self.platforms.append(Platform(self.screenrect.height - 160, 240, 100))
+        self.platforms.append(Platform(self.screenrect.height - 240, 40, 150))
+        self.platforms.append(Platform(self.screenrect.height - 240, 340, 150))
         self.sprites.add(self.platforms)
 
         # Loop until this is set True
@@ -100,9 +158,19 @@ class Bounce:
         pygame.display.flip()
 
     def nextState(self):
+        # Update particles
+        for particle in self.particles:
+            particle.update(self.screenrect, self.sprites, self.particles)
+
         # Gravity!
         if not self.player.onground:
-            self.player.velocity.y += 0.5
+            self.player.velocity.y += GRAVITY
+
+        # Save current position
+        self.player.lastrect.top = self.player.rect.top
+        self.player.lastrect.left = self.player.rect.left
+        self.player.lastrect.height = self.player.rect.height
+        self.player.lastrect.width = self.player.rect.width
 
         # Update position
         self.player.rect.left += self.player.velocity.x
@@ -110,8 +178,9 @@ class Bounce:
 
         # Collide with ground
         if not self.player.onground:
-            if (self.player.rect.bottom >= self.size.height):
-                self.player.rect.bottom = self.size.height
+            if (self.player.rect.bottom >= self.screenrect.height):
+                self.player.explode(self.particles, self.sprites)
+                self.player.rect.bottom = self.screenrect.height
                 self.player.velocity.y = 0
                 self.player.onground = True
 
@@ -119,21 +188,21 @@ class Bounce:
         if (self.player.rect.left < 0):
             self.player.velocity.x = 0
             self.player.rect.left = 0
-        if (self.player.rect.right > self.size.width):
+        if (self.player.rect.right > self.screenrect.width):
             self.player.velocity.x = 0
-            self.player.rect.right = self.size.width
+            self.player.rect.right = self.screenrect.width
 
         # Fall off platforms
         onplatform = False
         for platform in self.platforms:
             onplatform |= platform.onplatform(self.player)
 
-        if not onplatform and self.player.rect.bottom < self.size.height:
+        if not onplatform and self.player.rect.bottom < self.screenrect.height:
             self.player.onground = False
 
         # Collide with platforms
         for platform in self.platforms:
-            platform.collide(self.player)
+            platform.collide(self.player, self.particles, self.sprites)
 
     def processEvents(self):
         # Handle key preses from event queue
@@ -143,6 +212,8 @@ class Bounce:
             elif event.type == KEYDOWN:
                 if event.key == K_ESCAPE:
                     sys.exit()
+                elif event.key == K_SPACE:
+                    self.player.explode(self.particles, self.sprites)
 
         # Handle currently pressed keys
         pressed = pygame.key.get_pressed()
